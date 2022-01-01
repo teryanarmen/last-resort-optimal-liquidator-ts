@@ -100,13 +100,13 @@ describe("Test Liquidation Bot", () => {
 
     });
 
-    describe.skip("Deploying", () => {
+    describe("Deploying", () => {
         it("Should set the right owner", async () => {
             expect(await Liquidator.owner()).to.equal(liquidator.address)
         });
     });
 
-    describe.skip("Swapping", () => {
+    describe("Swapping", () => {
         it("Swapping with 0 balance should fail", async () => {
             let output1 = await testLiquidator._swapFromNative(USDT_ADDRESS);
             await expect(output1.wait()).to.be.reverted;
@@ -233,10 +233,7 @@ describe("Test Liquidation Bot", () => {
         });
     });
 
-    describe.skip("Optimal Liquidations", async () => {
-        // I need to: 
-        // - test finding optimal assets to liquidate 
-        // - only liquidate when profitable (large enough position, low enough gas)
+    describe("Optimal Liquidations", async () => {
         it("case 1: single deposit is optimal", async () => {
             // poor account, not enough value to liquidate
             let timestamp = (

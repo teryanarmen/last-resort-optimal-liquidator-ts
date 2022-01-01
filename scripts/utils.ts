@@ -1,5 +1,6 @@
 //@ts-ignore
 export function findOptimalLiquidation(data) {
+    // set up variables with lengths, idk if optimal
     let accounts = data["accounts"];
     let repayTokens: string[];
     (repayTokens = []).length = accounts.length;
@@ -25,10 +26,11 @@ export function findOptimalLiquidation(data) {
     let seizeAllCollateral: boolean[];
     (seizeAllCollateral = []).length = accounts.length;
     seizeAllCollateral.fill(false);
-    // optimal liquidation if collateral isnt too spread out or the borrow isnt too spread out
+
     let i = 0;
     for (let account of accounts) {
         for (let token of account["tokens"]) {
+            // gets most valuable pair of seizeToken and repayToken, USDvalue to liquidate and tokenAmount to liquidate
             if (token["market"]["underlyingPriceUSD"] * token["supplyBalanceUnderlying"] > seizeTokenValue[i]) {
                 seizeTokens[i] = token["symbol"];
                 seizeTokenValue[i] = token["market"]["underlyingPriceUSD"] * token["supplyBalanceUnderlying"];
@@ -40,6 +42,7 @@ export function findOptimalLiquidation(data) {
                 repayTokenAmount[i] = token["borrowBalanceUnderlying"];
             }
         }
+        // max amount based on if collateral in any single token >= max closefactor
         if (0.5 * repayTokenValue[i] >= seizeTokenValue[i]) {
             valueOfPair[i] = seizeTokenValue[i];
             seizeAllCollateral[i] = true;
@@ -51,6 +54,7 @@ export function findOptimalLiquidation(data) {
     let maxProfitIndex = valueOfPair.indexOf(Math.max(...valueOfPair));
     let seizeToken = seizeTokens[maxProfitIndex];
     let repayToken = repayTokens[maxProfitIndex];
+    // not exactly sure if this is right, the number of values should have to do with the decimals of the token so just taking out the decimal will make things work?
     let amountToLiquidate = seizeAllCollateral[maxProfitIndex] ?
         (seizeTokenAmount[maxProfitIndex]).toString().replace(".", "") :
         (0.5 * repayTokenAmount[maxProfitIndex]).toString().replace(".", "");
@@ -59,6 +63,7 @@ export function findOptimalLiquidation(data) {
 }
 
 // did not finish setting up this function as i did not finalize testing
+// used to set up underwater accounts so testing code isnt so repetative
 /*
 export async function setUpUnderwaterAccount(router, comptroller, underwater, depositAmount, waitTimeInSeconds, depositToken, borrowToken, jDepositToken, jBorrowToken) {
     let priceOracle = await ethers.getContractAt("PriceOracle", ORACLE_ADDRESS);

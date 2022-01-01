@@ -14,12 +14,13 @@ dotenv.config();
 const TRADER_JOE_LENDING_SUBGRAPH_URL = (
     "https://api.thegraph.com/subgraphs/name/traderjoe-xyz/lending");
 
+// should guarentee all possible liquidations to be profitable 
 async function getMinBalance() {
     return BigNumber.from(ethers.utils.formatUnits(await ethers.provider.getGasPrice(), "gwei")).mul(5);
 }
 const min_balance_borrowed = getMinBalance();
 
-const tokenNames = ["jAVAX", "jWETH", "jUSDT", "jWBTC", "jUSDC", "jMIM", "jDAI", "jLINK", "jXJOE"];
+const tokenNames = ["jAVAX", "jUSDC", "jUSDT", "jWETH", "jWBTC", "jMIM", "jDAI", "jLINK", "jXJOE"];
 
 const UNDERWATER_ACCOUNTS_QUERY = gql`
 {
@@ -54,8 +55,10 @@ async function main() {
         let data = await client.request(UNDERWATER_ACCOUNTS_QUERY);
         if (data["accounts"].length > 0) {
             let [repayToken, seizeToken, amountToLiquidate, liquidatee] = findOptimalLiquidation(data);
+            // token not used so far as seize or repay, prefer some tokens over others as theyre more liquid so take first in list also don't have to deal with issue of no direct paths with wavax, usdc, usdt
             let flashToken = tokenNames.filter(x => ![repayToken.substring(1), seizeToken.substring(1)].includes(x))[0];
 
+            // get addresses using name
             let repayTokenAddress = JOE_TO_ERC20[repayToken];
             let seizeTokenAddress = JOE_TO_ERC20[seizeToken];
             let flashTokenAddress = JOE_TO_ERC20[flashToken];
@@ -63,6 +66,7 @@ async function main() {
             let seizeTokenUnderlyingAddress = JOE_TO_JERC20[seizeTokenAddress];
             let flashTokenUnderlyingAddress = JOE_TO_JERC20[flashTokenAddress];
 
+            // make money
             liquidator.liquidateLoan(liquidatee, amountToLiquidate, repayTokenAddress, repayTokenUnderlyingAddress, seizeTokenAddress, seizeTokenUnderlyingAddress, flashTokenAddress, flashTokenUnderlyingAddress);
         }
     }
