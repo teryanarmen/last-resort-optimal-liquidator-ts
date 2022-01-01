@@ -88,6 +88,7 @@ contract Liquidator is ERC3156FlashBorrowerInterface {
         return true;
     }
 
+    // function thats called from script
     function liquidateLoan(
         address borrower,
         uint256 repayAmount,
@@ -98,6 +99,7 @@ contract Liquidator is ERC3156FlashBorrowerInterface {
         address jTokenFlashLoan,
         address jTokenFlashLoanUnderlying
     ) external {
+        // vars needed in the function that Banker Joe calls after sending funds
         bytes memory data = abi.encode(
             borrower,
             jTokenLiquidateAddress,
@@ -107,6 +109,7 @@ contract Liquidator is ERC3156FlashBorrowerInterface {
             jTokenFlashLoanUnderlying
         );
 
+        // call flash loan, this function will call onFlashloan
         ERC3156FlashLenderInterface(jTokenFlashLoan).flashLoan(
             this,
             jTokenFlashLoanUnderlying,
@@ -115,6 +118,7 @@ contract Liquidator is ERC3156FlashBorrowerInterface {
         );
     }
 
+    // Banker Joe calls this after sending the funds, this is where we liquidate and repay loan, along with swapping twice because of the re-entrancy guard
     function onFlashLoan(
         address initiator,
         address token,
@@ -138,9 +142,10 @@ contract Liquidator is ERC3156FlashBorrowerInterface {
                 data,
                 (address, address, address, address, address, address)
             );
-
+        // swap flashToken for repayToken
         swapERC20(jTokenFlashLoanUnderlying, jTokenLiquidateUnderlying);
 
+        // liquidate
         liquidateBorrower(
             jTokenLiquidateUnderlying,
             jTokenLiquidateAddress,
@@ -154,15 +159,17 @@ contract Liquidator is ERC3156FlashBorrowerInterface {
             jTokenLiquidateAddress,
             IERC20(jTokenLiquidateUnderlying).balanceOf(address(this))
         );
-
+        // seize seizeToken
         JToken(jTokenCollateral).redeem(
             JToken(jTokenCollateral).balanceOf(address(this))
         );
 
+        // swap seizeToken for flashToken
         swapERC20(jTokenCollateralUnderlying, jTokenFlashLoanUnderlying);
 
+        // approve Banker Joe to take flashToken repayment
         IERC20(token).approve(msg.sender, amount + fee);
-
+        // repay flashToken loan
         IERC20(jTokenFlashLoanUnderlying).transfer(
             owner,
             IERC20(jTokenFlashLoanUnderlying).balanceOf(address(this)) -
@@ -172,6 +179,7 @@ contract Liquidator is ERC3156FlashBorrowerInterface {
         return keccak256("ERC3156FlashBorrowerInterface.onFlashLoan");
     }
 
+    // actual liquidation
     function liquidateBorrower(
         address jTokenLiquidateUnderlying,
         address jTokenLiquidateAddress,
@@ -179,11 +187,13 @@ contract Liquidator is ERC3156FlashBorrowerInterface {
         uint256 repayAmount,
         address jTokenCollateral
     ) internal {
+        // once we call liquidate, contract pulls funds
         IERC20(jTokenLiquidateUnderlying).approve(
             jTokenLiquidateAddress,
             repayAmount
         );
 
+        // liquidate
         JToken(jTokenLiquidateAddress).liquidateBorrow(
             borrower,
             repayAmount,
