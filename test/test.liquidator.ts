@@ -1,12 +1,14 @@
-import { ethers } from "hardhat";
 import * as dotenv from "dotenv";
+import { ethers, network } from "hardhat";
 import { SignerWithAddress } from "hardhat-deploy-ethers/src/signers";
-import { Liquidator, TestLiquidator } from "../typechain/";
+import { Liquidator, TestLiquidator, JToken } from "../typechain/";
 import { expect } from "chai";
 import { BigNumber, Contract } from "ethers";
+import { GraphQLClient } from 'graphql-request';
 import {
-    JOE_ROUTER_ADDRESS, JOE_COMPTROLLER_ADDRESS, WAVAX_ADDRESS, WETH_ADDRESS, WBTC_ADDRESS, USDC_ADDRESS, USDT_ADDRESS, DAI_ADDRESS, LINK_ADDRESS, MIM_ADDRESS, XJOE_ADDRESS, jWAVAX_ADDRESS, jWETH_ADDRESS, jWBTC_ADDRESS, jUSDC_ADDRESS, jUSDT_ADDRESS, jDAI_ADDRESS, jLINK_ADDRESS, jMIM_ADDRESS, jXJOE_ADDRESS, ORACLE_ADDRESS, JOE_TO_ERC20
+    JOE_ROUTER_ADDRESS, JOE_COMPTROLLER_ADDRESS, WAVAX_ADDRESS, WETH_ADDRESS, WBTC_ADDRESS, USDC_ADDRESS, USDT_ADDRESS, DAI_ADDRESS, LINK_ADDRESS, MIM_ADDRESS, XJOE_ADDRESS, jWAVAX_ADDRESS, jWETH_ADDRESS, jWBTC_ADDRESS, jUSDC_ADDRESS, jUSDT_ADDRESS, jDAI_ADDRESS, jLINK_ADDRESS, jMIM_ADDRESS, jXJOE_ADDRESS, ORACLE_ADDRESS, JOE_TO_ERC20, UNDERWATER_ACCOUNTS_QUERY, MARKET_QUERY, JOE_TO_JERC20, TRADER_JOE_LENDING_SUBGRAPH_URL
 } from "../scripts/addresses";
+import { findOptimalLiquidation } from "../scripts/utils";
 // import { request, gql, GraphQLClient } from 'graphql-request';
 // import {setUpUnderwarerAccount} from "./scripts/helpful-scripts";
 // import { dataSource } from '@graphprotocol/graph-ts';
@@ -56,7 +58,7 @@ describe("Test Liquidation Bot", () => {
                 {
                     forking: {
                         jsonRpcUrl: AVALANCHE_MAINNET_URL,
-                        blockNumber: 7300000,
+                        blockNumber: 9500000
                     },
                 },
             ],
@@ -100,14 +102,14 @@ describe("Test Liquidation Bot", () => {
 
     });
 
-    describe("Deploying", () => {
+    describe.skip("Deploying", () => {
         it("Should set the right owner", async () => {
             expect(await Liquidator.owner()).to.equal(liquidator.address)
         });
     });
 
-    describe("Swapping", () => {
-        it("Swapping with 0 balance should fail", async () => {
+    describe.skip("Swapping", () => {
+        it.skip("Swapping with 0 balance should fail", async () => {
             let output1 = await testLiquidator._swapFromNative(USDT_ADDRESS);
             await expect(output1.wait()).to.be.reverted;
             let output2 = await testLiquidator._swapERC20(USDT_ADDRESS, WETH_ADDRESS);
@@ -117,7 +119,7 @@ describe("Test Liquidation Bot", () => {
         });
 
         // AVAX -> USDT, USDT -> WETH, WETH -> AVAX, everything should work
-        it("Swapping with enough balance should work", async () => {
+        it.skip("Swapping with enough balance should work", async () => {
             let tx = await liquidator.sendTransaction({
                 to: testLiquidator.address,
                 value: ethers.utils.parseEther("1.0")
@@ -139,9 +141,38 @@ describe("Test Liquidation Bot", () => {
             await expect(output3.wait()).to.be.ok;
             expect(await WETH.balanceOf(testLiquidator.address)).eq('0');
         });
+
+        it("Swapping tokens w/o direct path should work", async () => {
+            let tx = await liquidator.sendTransaction({
+                to: testLiquidator.address,
+                value: ethers.utils.parseEther("1.0")
+            });
+            tx.wait();
+            expect((await ethers.provider.getBalance(testLiquidator.address)).toString()).to.eq(ethers.utils.parseEther("1.0"));
+
+            let output1 = await testLiquidator._swapFromNative(USDT_ADDRESS);
+            await expect(output1.wait()).to.be.ok;
+            expect(await USDT.balanceOf(testLiquidator.address)).gt('0');
+
+            let output2 = await testLiquidator._swapERC20(USDT_ADDRESS, USDC_ADDRESS);
+            await expect(output2.wait()).to.be.ok;
+
+            expect(await USDT.balanceOf(testLiquidator.address)).eq('0');
+            expect(await USDC.balanceOf(testLiquidator.address)).gt('0');
+
+            let output3 = await testLiquidator._swapERC20(USDC_ADDRESS, LINK_ADDRESS);
+            await expect(output3.wait()).to.be.ok;
+
+            expect(await USDC.balanceOf(testLiquidator.address)).eq('0');
+            expect(await LINK.balanceOf(testLiquidator.address)).gt('0');
+
+            let output4 = await testLiquidator._swapToNative(LINK_ADDRESS);
+            await expect(output4.wait()).to.be.ok;
+            expect(await LINK.balanceOf(testLiquidator.address)).eq('0');
+        })
     });
 
-    describe("Setting up underwater account and liquidating single position", async () => {
+    describe.skip("Setting up underwater account and liquidating single position", async () => {
 
         it('deposit and accrue interest; liquidate', async () => {
             // need timestamp for timelimit input in swap function 
@@ -197,34 +228,36 @@ describe("Test Liquidation Bot", () => {
             expect(err1).eq('0');
 
             // get price of borrow token.
-            let USDTprice = await priceOracle.getUnderlyingPrice(jUSDT.address);
+            let LINKprice = await priceOracle.getUnderlyingPrice(jLINK.address);
 
             // calculate max borrow, need big ints else overflow
-            let max_borrow_amount = BigInt(liquidity1) * BigInt(10 ** 18) / BigInt(USDTprice);
+            let max_borrow_amount = BigInt(liquidity1) * BigInt(10 ** 18) / BigInt(LINKprice);
 
             // borrow max borrow amount
-            await jUSDT.connect(underwater).borrow(max_borrow_amount);
+            await jLINK.connect(underwater).borrow(max_borrow_amount);
 
             // make sure some funds were borrowed
-            expect(await USDT.balanceOf(underwater.address)).gt('0');
+            expect(await LINK.balanceOf(underwater.address)).gt('0');
 
             // pass time
-            await ethers.provider.send("evm_increaseTime", [60 * 60 * 24]);
+            await ethers.provider.send("evm_increaseTime", [60 * 60 * 24 * 200]);
 
             // update borrow balance ( apply interest )
             // maybe can use accrueInterest instead?
-            //await jUSDT.borrowBalanceCurrent(underwater.address);
-            await jUSDT.accrueInterest();
+            // await jUSDT.borrowBalanceCurrent(underwater.address);
+            await jLINK.accrueInterest();
 
-            // "0" + is a test
-            let repayAmount = BigNumber.from("0" + await jUSDT.callStatic.borrowBalanceCurrent(underwater.address)).div(2);
+            // "0" + is a test to see if a 0 in the front throws an error
+            // repay amount is wrong, does not account for decimals
+            let repayAmount = BigNumber.from(await jLINK.callStatic.borrowBalanceCurrent(underwater.address)).div(2);
+            console.log(repayAmount);
 
             // no error pls; some shortfall tho
             let [err2, liquidity2, someShortfall] = await comptroller.getAccountLiquidity(underwater.address);
             expect(err2).eq('0');
             expect(someShortfall).gt('0');
 
-            await Liquidator.connect(liquidator).liquidateLoan(underwater.address, repayAmount, jUSDT_ADDRESS, USDT_ADDRESS, jWETH_ADDRESS, WETH_ADDRESS, jUSDC_ADDRESS, USDC_ADDRESS);
+            await Liquidator.connect(liquidator).liquidateLoan(underwater.address, repayAmount, jLINK_ADDRESS, LINK_ADDRESS, jWETH_ADDRESS, WETH_ADDRESS, jUSDC_ADDRESS, USDC_ADDRESS);
 
             let profit = await USDC.balanceOf(liquidator.address);
             expect(profit).gt('0');
@@ -233,7 +266,7 @@ describe("Test Liquidation Bot", () => {
         });
     });
 
-    describe("Optimal Liquidations", async () => {
+    describe.skip("Optimal Liquidations", async () => {
         it("case 1: single deposit is optimal", async () => {
             // poor account, not enough value to liquidate
             let timestamp = (
@@ -352,6 +385,47 @@ describe("Test Liquidation Bot", () => {
 
         it("case 4: randomized testing (pick random tokens to deposit and borrow, TODO", async () => {
 
+        });
+    });
+
+    describe("Liquidate real positions", () => {
+        it("0x343ba440db35997170cc6402692a0803c360c48c", async () => {
+            await network.provider.request({
+                method: "hardhat_impersonateAccount",
+                params: ["0x609c81644a2A85751F6F69C2f98F64f6D715b016"],
+            });
+            const signer = await ethers.getSigner("0x609c81644a2A85751F6F69C2f98F64f6D715b016");
+            expect((await ethers.provider.getBalance(signer.address))).to.be.gt("0");
+
+            const client = new GraphQLClient(TRADER_JOE_LENDING_SUBGRAPH_URL);
+            let underwaterAccountsData = await client.request(UNDERWATER_ACCOUNTS_QUERY);
+            let marketData = await client.request(MARKET_QUERY);
+
+            if (underwaterAccountsData["accounts"].length > 0) {
+                let [liquidationToken, seizeToken, flashToken, amountToFlashloan, liquidatee] = findOptimalLiquidation(underwaterAccountsData, marketData);
+                // token not used so far as seize or repay, prefer some tokens over others as theyre more liquid so take first in list also don't have to deal with issue of no direct paths with wavax, usdc, usdt
+
+                let balanceBefore = await USDC.balanceOf(liquidator.address);
+
+                // get addresses using name
+                let liquidationTokenAddress = JOE_TO_JERC20[liquidationToken];
+                let seizeTokenAddress = JOE_TO_JERC20[seizeToken];
+                let flashTokenAddress = JOE_TO_JERC20[flashToken];
+                let liquidationTokenUnderlyingAddress = JOE_TO_ERC20[liquidationToken];
+                let seizeTokenUnderlyingAddress = JOE_TO_ERC20[seizeToken];
+                let flashTokenUnderlyingAddress = JOE_TO_ERC20[flashToken];
+                console.log(liquidationToken, seizeToken, flashToken, amountToFlashloan, liquidatee);
+                await Liquidator.connect(signer).liquidateLoan(liquidatee, amountToFlashloan, liquidationTokenAddress, liquidationTokenUnderlyingAddress, seizeTokenAddress, seizeTokenUnderlyingAddress, flashTokenAddress, flashTokenUnderlyingAddress, { gasLimit: 1375015 })
+
+                let profit = (await USDC.balanceOf(liquidator.address)) - balanceBefore;
+
+
+                console.log(profit);
+
+
+
+
+            }
         });
     });
 

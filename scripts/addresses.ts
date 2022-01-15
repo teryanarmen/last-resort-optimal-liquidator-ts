@@ -1,6 +1,13 @@
-export const LIQUIDATOR_ADDRESS = "0x0000000000000000000000000000000000000000";
+import { gql } from 'graphql-request';
+
+export const LIQUIDATOR_ADDRESS = "0x0000000000000000000000000000000000000000"; // DEPLOY AND CHANGE ADDRESS
+export const TEST_LIQUIDATOR_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 export const AVALANCHE_MAINNET_URL = "https://api.avax.network/ext/bc/C/rpc";
+export const AVALANCHE_FUJI_URL = "https://api.avax-test.network/ext/bc/C/rpc";
+
+export const TRADER_JOE_LENDING_SUBGRAPH_URL = "https://api.thegraph.com/subgraphs/name/traderjoe-xyz/lending";
+export const TRADER_JOE_EXCHANGE_SUBGRAPH_URL = "https://api.thegraph.com/subgraphs/name/traderjoe-xyz/exchange";
 
 export const JOE_ROUTER_ADDRESS = "0x60aE616a2155Ee3d9A68541Ba4544862310933d4";
 export const JOE_COMPTROLLER_ADDRESS = "0xdc13687554205E5b89Ac783db14bb5bba4A1eDaC";
@@ -24,6 +31,7 @@ export const jDAI_ADDRESS = "0xc988c170d0E38197DC634A45bF00169C7Aa7CA19";
 export const jLINK_ADDRESS = "0x585E7bC75089eD111b656faA7aeb1104F5b96c15";
 export const jMIM_ADDRESS = "0xcE095A9657A02025081E0607c8D8b081c76A75ea";
 export const jXJOE_ADDRESS = "0xC146783a59807154F92084f9243eb139D58Da696";
+
 export const ORACLE_ADDRESS = "0xe34309613B061545d42c4160ec4d64240b114482";
 
 export const JOE_TO_ERC20: any = {
@@ -49,3 +57,46 @@ export const JOE_TO_JERC20: any = {
     "jMIM": jMIM_ADDRESS,
     "jXJOE": jXJOE_ADDRESS,
 };
+
+export const DECIMALS_ERC20: any = {
+    "jAVAX": 18,
+    "jWETH": 18,
+    "jWBTC": 8,
+    "jUSDC": 6,
+    "jUSDT": 6,
+    "jDAI": 18,
+    "jLINK": 18,
+    "jMIM": 18,
+    "jXJOE": 18,
+}
+
+export const UNDERWATER_ACCOUNTS_QUERY = gql`
+{
+    accounts(where: {health_gt: 0.1, health_lt: 1, totalCollateralValueInUSD_gt: 0}, orderBy: totalCollateralValueInUSD, orderDirection: desc, first: 6) {
+        id
+        health
+        totalBorrowValueInUSD
+        totalCollateralValueInUSD
+        tokens {
+            symbol
+            market {
+                underlyingPriceUSD
+            }
+            supplyBalanceUnderlying
+            borrowBalanceUnderlying
+            enteredMarket
+        }
+    }
+
+}`;
+
+export const MARKET_QUERY = gql`
+{
+    markets {
+      id
+      symbol
+      underlyingPriceUSD
+      underlyingDecimals
+    }
+}
+`

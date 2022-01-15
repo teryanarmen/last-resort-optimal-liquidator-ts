@@ -2,8 +2,6 @@
 
 pragma solidity ^0.8.0;
 
-import "./console.sol";
-
 import "./interfaces/joecore/IERC20.sol";
 import "./interfaces/joecore/IWAVAX.sol";
 import "./interfaces/joecore/IJoeRouter02.sol";
@@ -41,8 +39,6 @@ contract Liquidator is ERC3156FlashBorrowerInterface {
 
     address public owner;
 
-    address public WAVAX = 0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7;
-
     IJoeRouter02 public joeRouter;
     Joetroller public joeComptroller;
 
@@ -64,9 +60,21 @@ contract Liquidator is ERC3156FlashBorrowerInterface {
         uint256 amountFrom = IERC20(tokenFrom).balanceOf(address(this));
 
         IERC20(tokenFrom).approve(address(joeRouter), amountFrom);
-        address[] memory path = new address[](2);
-        path[0] = tokenFrom;
-        path[1] = tokenTo;
+        address[] memory path;
+
+        if (
+            tokenFrom != 0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7 &&
+            tokenTo != 0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7
+        ) {
+            path = new address[](3);
+            path[0] = tokenFrom;
+            path[1] = 0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7;
+            path[2] = tokenTo;
+        } else {
+            path = new address[](2);
+            path[0] = tokenFrom;
+            path[1] = tokenTo;
+        }
 
         joeRouter.swapExactTokensForTokens(
             amountFrom,
@@ -91,7 +99,7 @@ contract Liquidator is ERC3156FlashBorrowerInterface {
     // function thats called from script
     function liquidateLoan(
         address borrower,
-        uint256 repayAmount,
+        uint256 flashloanAmount,
         address jTokenLiquidateAddress,
         address jTokenLiquidateUnderlying,
         address jTokenCollateral,
@@ -109,11 +117,12 @@ contract Liquidator is ERC3156FlashBorrowerInterface {
             jTokenFlashLoanUnderlying
         );
 
-        // call flash loan, this function will call onFlashloan
+        // call flash loan, this function will then call onFlashloan with data, exepecting for loan to be paid back once the function is done executing
+
         ERC3156FlashLenderInterface(jTokenFlashLoan).flashLoan(
             this,
-            jTokenFlashLoanUnderlying,
-            repayAmount,
+            msg.sender,
+            flashloanAmount,
             data
         );
     }
@@ -208,12 +217,43 @@ contract Liquidator is ERC3156FlashBorrowerInterface {
 
 // A contract used for testing
 contract TestLiquidator is Liquidator {
+    address public WAVAX = 0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7;
+
     constructor(address joeRouterAddress, address joeComptrollerAddress)
         Liquidator(joeRouterAddress, joeComptrollerAddress)
     {}
 
     function _swapERC20(address tokenFrom, address tokenTo) public {
         require(swapERC20(tokenFrom, tokenTo), "swap failed");
+    }
+
+    function swapToNative(address tokenFrom) internal returns (bool) {
+        require(
+            IERC20(tokenFrom).balanceOf(address(this)) > 0,
+            "Contract has no balance of tokenFrom"
+        );
+
+        uint256 amountFrom = IERC20(tokenFrom).balanceOf(address(this));
+        address[] memory path = new address[](2);
+        path[0] = tokenFrom;
+        path[1] = 0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7;
+        IERC20(tokenFrom).approve(address(joeRouter), amountFrom);
+        joeRouter.swapExactTokensForAVAX(
+            amountFrom,
+            1,
+            path,
+            address(this),
+            block.timestamp + 1 minutes
+        );
+
+        require(address(this).balance > 0, "has no native balance");
+        emit Swapped(
+            tokenFrom,
+            0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7,
+            IERC20(tokenFrom).balanceOf(address(this)),
+            address(this).balance
+        );
+        return true;
     }
 
     function swapFromNative(address tokenTo) internal returns (bool) {
@@ -240,35 +280,6 @@ contract TestLiquidator is Liquidator {
             tokenTo,
             amountAvax,
             IERC20(tokenTo).balanceOf(address(this))
-        );
-        return true;
-    }
-
-    function swapToNative(address tokenFrom) internal returns (bool) {
-        require(
-            IERC20(tokenFrom).balanceOf(address(this)) > 0,
-            "Contract has no balance of tokenFrom"
-        );
-
-        uint256 amountFrom = IERC20(tokenFrom).balanceOf(address(this));
-        address[] memory path = new address[](2);
-        path[0] = tokenFrom;
-        path[1] = WAVAX;
-        IERC20(tokenFrom).approve(address(joeRouter), amountFrom);
-        joeRouter.swapExactTokensForAVAX(
-            amountFrom,
-            1,
-            path,
-            address(this),
-            block.timestamp + 1 minutes
-        );
-
-        require(address(this).balance > 0, "has no native balance");
-        emit Swapped(
-            tokenFrom,
-            WAVAX,
-            IERC20(tokenFrom).balanceOf(address(this)),
-            address(this).balance
         );
         return true;
     }

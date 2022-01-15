@@ -2,74 +2,57 @@ import * as dotenv from 'dotenv';
 import { ethers } from "hardhat";
 import { Wallet, BigNumber } from "ethers";
 import {
-    LIQUIDATOR_ADDRESS, JOE_TO_ERC20, JOE_TO_JERC20
+    TRADER_JOE_LENDING_SUBGRAPH_URL, TRADER_JOE_EXCHANGE_SUBGRAPH_URL, LIQUIDATOR_ADDRESS, JOE_TO_ERC20, JOE_TO_JERC20, AVALANCHE_MAINNET_URL, UNDERWATER_ACCOUNTS_QUERY, MARKET_QUERY
 } from "./addresses";
 import { findOptimalLiquidation } from "./utils";
-import { gql, GraphQLClient } from 'graphql-request';
+import { GraphQLClient } from 'graphql-request';
 dotenv.config();
 
-
-// const AVALANCHE_MAINNET_URL = process.env.AVA ANCHE_MAINNET_URL!;
-
-const TRADER_JOE_LENDING_SUBGRAPH_URL = (
-    "https://api.thegraph.com/subgraphs/name/traderjoe-xyz/lending");
-
-// should guarentee all possible liquidations to be profitable 
 async function getMinBalance() {
     return BigNumber.from(ethers.utils.formatUnits(await ethers.provider.getGasPrice(), "gwei")).mul(5);
 }
-const min_balance_borrowed = getMinBalance();
 
-const tokenNames = ["jAVAX", "jUSDC", "jUSDT", "jWETH", "jWBTC", "jMIM", "jDAI", "jLINK", "jXJOE"];
 
-const UNDERWATER_ACCOUNTS_QUERY = gql`
-{
-    accounts(where: {health_gt: 0, health_lt: 1, totalBorrowValueInUSD_gt: ${min_balance_borrowed}}, orderBy: totalBorrowValueInUSD, orderDirection: desc) {
-        id
-        health
-        totalBorrowValueInUSD
-        totalCollateralValueInUSD
-        tokens {
-            id
-            symbol
-            market {
-                underlyingPriceUSD
-            }
-            supplyBalanceUnderlying
-            borrowBalanceUnderlying
-            enteredMarket
-        }
-    }
-}
-`;
+
+
 
 const PRIVATE_KEY = process.env.PRIVATE_KEY!;
-const deployer = new Wallet(PRIVATE_KEY);
 
 async function main() {
+    const provider = await ethers.getDefaultProvider(AVALANCHE_MAINNET_URL);
+    const deployer = new Wallet(PRIVATE_KEY, provider);
     const liquidator = await ethers.getContractAt("Liquidator", LIQUIDATOR_ADDRESS);
-    liquidator.connect(deployer);
     const client = new GraphQLClient(TRADER_JOE_LENDING_SUBGRAPH_URL);
 
-    while (true) {
-        let data = await client.request(UNDERWATER_ACCOUNTS_QUERY);
-        if (data["accounts"].length > 0) {
-            let [repayToken, seizeToken, amountToLiquidate, liquidatee] = findOptimalLiquidation(data);
+    let i = 0;
+
+    while (i < 1) { // CHANGE 1 TO DIFF NUMBER IF YOU WANT TO RUN CONTINUOUSLY
+        i++;
+        let underwaterAccountsData = await client.request(UNDERWATER_ACCOUNTS_QUERY);
+        let marketData = await client.request(MARKET_QUERY);
+        if (underwaterAccountsData["accounts"].length > 0) {
+            let [liquidationToken, seizeToken, flashToken, amountToFlashloan, liquidatee] = findOptimalLiquidation(underwaterAccountsData, marketData);
             // token not used so far as seize or repay, prefer some tokens over others as theyre more liquid so take first in list also don't have to deal with issue of no direct paths with wavax, usdc, usdt
-            let flashToken = tokenNames.filter(x => ![repayToken.substring(1), seizeToken.substring(1)].includes(x))[0];
 
             // get addresses using name
-            let repayTokenAddress = JOE_TO_ERC20[repayToken];
-            let seizeTokenAddress = JOE_TO_ERC20[seizeToken];
-            let flashTokenAddress = JOE_TO_ERC20[flashToken];
-            let repayTokenUnderlyingAddress = JOE_TO_JERC20[repayTokenAddress];
-            let seizeTokenUnderlyingAddress = JOE_TO_JERC20[seizeTokenAddress];
-            let flashTokenUnderlyingAddress = JOE_TO_JERC20[flashTokenAddress];
+            let liquidationTokenAddress = JOE_TO_JERC20[liquidationToken];
+            let seizeTokenAddress = JOE_TO_JERC20[seizeToken];
+            let flashTokenAddress = JOE_TO_JERC20[flashToken];
+            let liquidationTokenUnderlyingAddress = JOE_TO_ERC20[liquidationToken];
+            let seizeTokenUnderlyingAddress = JOE_TO_ERC20[seizeToken];
+            let flashTokenUnderlyingAddress = JOE_TO_ERC20[flashToken];
 
             // make money
-            liquidator.liquidateLoan(liquidatee, amountToLiquidate, repayTokenAddress, repayTokenUnderlyingAddress, seizeTokenAddress, seizeTokenUnderlyingAddress, flashTokenAddress, flashTokenUnderlyingAddress);
+            await liquidator.connect(deployer).liquidateLoan(liquidatee, amountToFlashloan, liquidationTokenAddress, liquidationTokenUnderlyingAddress, seizeTokenAddress, seizeTokenUnderlyingAddress, flashTokenAddress, flashTokenUnderlyingAddress, { gasLimit: 1375015 });
+
+            console.log("got one?");
         }
     }
 }
 
-main();
+main()
+    .then(() => process.exit(0))
+    .catch(error => {
+        console.error(error)
+        process.exit(1)
+    });

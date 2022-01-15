@@ -1,24 +1,23 @@
+const tokenNames = ["jUSDC", "jAVAX", "jUSDT", "jWETH", "jWBTC", "jMIM", "jDAI", "jLINK", "jXJOE"];
+
 //@ts-ignore
-export function findOptimalLiquidation(data) {
+export function findOptimalLiquidation(data, marketData) {
     // set up variables with lengths, idk if optimal
     let accounts = data["accounts"];
-    let repayTokens: string[];
-    (repayTokens = []).length = accounts.length;
-    let repayTokenValue: number[];
-    (repayTokenValue = []).length = accounts.length;
-    repayTokenValue.fill(0);
-    let repayTokenAmount: number[];
-    (repayTokenAmount = []).length = accounts.length;
-    repayTokenAmount.fill(0);
+    let liquidationTokens: string[];
+    (liquidationTokens = []).length = accounts.length;
+    let liquidationTokenValue: number[];
+    (liquidationTokenValue = []).length = accounts.length;
+    liquidationTokenValue.fill(0);
+    let liquidationTokenAmount: number[];
+    (liquidationTokenAmount = []).length = accounts.length;
+    liquidationTokenAmount.fill(0);
 
     let seizeTokens: string[];
     (seizeTokens = []).length = accounts.length;
     let seizeTokenValue: number[];
     (seizeTokenValue = []).length = accounts.length;
     seizeTokenValue.fill(0);
-    let seizeTokenAmount: number[];
-    (seizeTokenAmount = []).length = accounts.length;
-    seizeTokenAmount.fill(0);
 
     let valueOfPair: number[];
     (valueOfPair = []).length = accounts.length;
@@ -30,37 +29,65 @@ export function findOptimalLiquidation(data) {
     let i = 0;
     for (let account of accounts) {
         for (let token of account["tokens"]) {
-            // gets most valuable pair of seizeToken and repayToken, USDvalue to liquidate and tokenAmount to liquidate
+            // gets most valuable pair of seizeToken and liquidationToken, USDvalue to liquidate and tokenAmount to liquidate
             if (token["market"]["underlyingPriceUSD"] * token["supplyBalanceUnderlying"] > seizeTokenValue[i]) {
                 seizeTokens[i] = token["symbol"];
                 seizeTokenValue[i] = token["market"]["underlyingPriceUSD"] * token["supplyBalanceUnderlying"];
-                seizeTokenAmount[i] = token["supplyBalanceUnderlying"];
             }
-            if (token["market"]["underlyingPriceUSD"] * token["borrowBalanceUnderlying"] > repayTokenValue[i]) {
-                repayTokens[i] = token["symbol"];
-                repayTokenValue[i] = token["market"]["underlyingPriceUSD"] * token["borrowBalanceUnderlying"];
-                repayTokenAmount[i] = token["borrowBalanceUnderlying"];
+
+            if (token["market"]["underlyingPriceUSD"] * token["borrowBalanceUnderlying"] > liquidationTokenValue[i]) {
+                liquidationTokens[i] = token["symbol"];
+                liquidationTokenValue[i] = token["market"]["underlyingPriceUSD"] * token["borrowBalanceUnderlying"];
+                liquidationTokenAmount[i] = token["borrowBalanceUnderlying"];
             }
         }
-        // max amount based on if collateral in any single token >= max closefactor
-        if (0.5 * repayTokenValue[i] >= seizeTokenValue[i]) {
+        // max liquidatable amount based on if collateral in any single token >= max closefactor
+        if (0.5 * liquidationTokenValue[i] >= seizeTokenValue[i]) {
             valueOfPair[i] = seizeTokenValue[i];
             seizeAllCollateral[i] = true;
         } else {
-            valueOfPair[i] = 0.5 * repayTokenValue[i];
+            valueOfPair[i] = 0.5 * liquidationTokenValue[i];
         }
         i++;
     }
+
+
     let maxProfitIndex = valueOfPair.indexOf(Math.max(...valueOfPair));
-    let seizeToken = seizeTokens[maxProfitIndex];
-    let repayToken = repayTokens[maxProfitIndex];
-    // not exactly sure if this is right, the number of values should have to do with the decimals of the token so just taking out the decimal will make things work?
-    let amountToLiquidate = seizeAllCollateral[maxProfitIndex] ?
-        (seizeTokenAmount[maxProfitIndex]).toString().replace(".", "") :
-        (0.5 * repayTokenAmount[maxProfitIndex]).toString().replace(".", "");
     let liquidatee = accounts[maxProfitIndex]["id"];
-    return [repayToken, seizeToken, amountToLiquidate, liquidatee]
+    let seizeToken = seizeTokens[maxProfitIndex];
+    let liquidationToken = liquidationTokens[maxProfitIndex];
+    let flashToken = tokenNames.filter(x => ![liquidationToken, seizeToken].includes(x))[0];
+
+    // @ts-ignore
+    let flashMarket = marketData["markets"].find(o => o.symbol == flashToken);
+    let flashTokenPrice = flashMarket["underlyingPriceUSD"];
+    let flashTokenDecimals = flashMarket["underlyingDecimals"];
+
+    // let flashLoanTokenPrice = marketData["markets"][]
+
+    // not exactly sure if this is right, the number of values should have to do with the decimals of the token so just taking out the decimal will make things work? no. dont assume its easy.
+
+    let valueToFlashloan = seizeAllCollateral[maxProfitIndex] ?
+        (seizeTokenValue[maxProfitIndex]) :
+        (0.5 * liquidationTokenValue[maxProfitIndex]);
+
+    // figuring out amount to flashloan w.r.t decimals
+    let amountToFlashloanWrongDecimals = (valueToFlashloan / flashTokenPrice);
+    let amountToFlashloanWrongDecimalsArray = amountToFlashloanWrongDecimals.toString().split(".");
+
+    let multiplier = flashTokenDecimals - amountToFlashloanWrongDecimalsArray[1].length;
+    let amountToFlashloan = (parseInt(amountToFlashloanWrongDecimalsArray[0]) * 10 ** amountToFlashloanWrongDecimalsArray[1].length + parseInt(amountToFlashloanWrongDecimalsArray[1])) * (10 ** multiplier);
+
+    /*
+    let amountToFlashloan = seizeAllCollateral[maxProfitIndex] ?
+        seizeTokenAmount[maxProfitIndex] :
+        (0.5 * repayTokenAmount[maxProfitIndex]);
+    let liquidatee = accounts[maxProfitIndex]["id"];
+    */
+
+    return [liquidationToken, seizeToken, flashToken, Math.floor(amountToFlashloan), liquidatee]
 }
+
 
 // did not finish setting up this function as i did not finalize testing
 // used to set up underwater accounts so testing code isnt so repetative

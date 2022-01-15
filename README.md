@@ -8,7 +8,7 @@ I took jummy's code and used typescript and ethers to do deployment + testing + 
 The flow of the bot is similar to jummy's but with a few differences:
 - profit maximized liquidation
 - more detailed graphql query
-- computing flashloan amount and repay amount off chain using extra info from said query
+- off chain compute of flashloan and repay amounts using extra info from said query
 
 The general flow is as follows:
 1. query the graph
@@ -16,16 +16,16 @@ The general flow is as follows:
 3. flashloan amount of different token to get around re-entrancy guard
 4. swap flashloaned token to borrowed token
 5. repay loan, seize collateral
-6. swap borrowed token to flashloaned token
+6. swap collateral token to flashloaned token
 7. repay flashloan
 8. send out profit
 
 # Deploying and running bot
 
-To run this you need hardhat, ethers, typechain, and graphql-request installed along with any dependencies. I don't know what all the dependencies are but usually if something is missing you'll get some red lines telling you what to do. Once everything is set up you just need to set up the .env file with Infura/Alchemy info and a private key. I would suggest making a seperate address to deploy the contract from, maybe look into how to make it untraceable/hard to trace back to your main account also. Once this is all set up, add avax to hardhat networks and then run: 
+To run this you need hardhat, ethers, typechain, and graphql-request installed along with any dependencies. I don't know what all the dependencies are but usually if something is missing you'll get some red lines telling you what to do. Once everything is set up you just need to set up the .env file with Infura/Alchemy (don't need) info and a private key. I would suggest making a seperate address to deploy the contract from, maybe look into how to make it untraceable/hard to trace back to your main account also. Once this is all set up, add avax to hardhat networks and then run: 
 
 `hh run /scripts/deploy.ts --network avax`
-then take the contract address and add it to the addresses.ts file, replacing the 0 address set there currently, and finally run the main script:
+then take the liquidator contract address and add it to the addresses.ts file, replacing the 0 address set there currently, and finally run the main script:
 `hh run /scripts/index.ts --network avax`
 this is an infinite loop so there might be some weird stuff happening
 
@@ -59,3 +59,9 @@ You should test first with `hh test` or more specifically `hh test /test/test.li
 - run own node with AWS, get data faster
 - swapping pairs with no direct path fails, but less likely to happen
 - set up local graph node to test optimizations more thoroughly/realistically
+
+# Update
+- Landed a successful liquidation! 
+https://snowtrace.io/tx/0xb02afc8da2978cf9651888790bea1981d08bef2626a1482be889bf7064803060
+
+- Made the bot able to swap any pairs
