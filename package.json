@@ -34,6 +34,7 @@
   },
   "dependencies": {
     "@graphprotocol/graph-ts": "^0.24.1",
+    "@openzeppelin/contracts": "^3.4.0",
     "dotenv": "^10.0.0",
     "graph-cli": "^0.0.1",
     "graphql-request": "^3.7.0"

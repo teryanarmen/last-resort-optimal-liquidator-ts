@@ -1,17 +1,15 @@
 import * as dotenv from "dotenv";
-import { ethers, network } from "hardhat";
+import { ethers } from "hardhat";
 import { SignerWithAddress } from "hardhat-deploy-ethers/src/signers";
-import { Liquidator, TestLiquidator, JToken } from "../typechain/";
+import { Liquidator, TestLiquidator } from "../typechain";
 import { expect } from "chai";
 import { BigNumber, Contract } from "ethers";
 import { GraphQLClient } from 'graphql-request';
 import {
-    JOE_ROUTER_ADDRESS, JOE_COMPTROLLER_ADDRESS, WAVAX_ADDRESS, WETH_ADDRESS, WBTC_ADDRESS, USDC_ADDRESS, USDT_ADDRESS, DAI_ADDRESS, LINK_ADDRESS, MIM_ADDRESS, XJOE_ADDRESS, jWAVAX_ADDRESS, jWETH_ADDRESS, jWBTC_ADDRESS, jUSDC_ADDRESS, jUSDT_ADDRESS, jDAI_ADDRESS, jLINK_ADDRESS, jMIM_ADDRESS, jXJOE_ADDRESS, ORACLE_ADDRESS, JOE_TO_ERC20, UNDERWATER_ACCOUNTS_QUERY, MARKET_QUERY, JOE_TO_JERC20, TRADER_JOE_LENDING_SUBGRAPH_URL
-} from "../scripts/addresses";
+    JOE_FACTORY_ADDRESS, JOE_ROUTER_ADDRESS, JOE_COMPTROLLER_ADDRESS, WAVAX_ADDRESS, WETH_ADDRESS, WBTC_ADDRESS, USDC_ADDRESS, USDT_ADDRESS, DAI_ADDRESS, LINK_ADDRESS, MIM_ADDRESS, XJOE_ADDRESS, jWAVAX_ADDRESS, jWETH_ADDRESS, jWBTC_ADDRESS, jUSDC_ADDRESS, jUSDT_ADDRESS, jDAI_ADDRESS, jLINK_ADDRESS, jMIM_ADDRESS, jXJOE_ADDRESS, ORACLE_ADDRESS, JOE_TO_ERC20, UNDERWATER_ACCOUNTS_QUERY, MARKET_QUERY, JOE_TO_JERC20, TRADER_JOE_LENDING_SUBGRAPH_URL
+} from "../scripts/constants";
 import { findOptimalLiquidation } from "../scripts/utils";
-// import { request, gql, GraphQLClient } from 'graphql-request';
-// import {setUpUnderwarerAccount} from "./scripts/helpful-scripts";
-// import { dataSource } from '@graphprotocol/graph-ts';
+
 dotenv.config();
 
 describe("Test Liquidation Bot", () => {
@@ -45,25 +43,28 @@ describe("Test Liquidation Bot", () => {
 
     let router: Contract;
     let comptroller: Contract;
+    let factory: Contract;
 
     let priceOracle: Contract;
 
     const AVALANCHE_MAINNET_URL = process.env.AVALANCHE_MAINNET_URL!;
 
     beforeEach(async () => {
-        // reset fork
+        // resets fork before each describe block
         await ethers.provider.send(
             "hardhat_reset",
             [
                 {
                     forking: {
                         jsonRpcUrl: AVALANCHE_MAINNET_URL,
-                        blockNumber: 9500000
+                        // blockNumber: 10420000
+
                     },
                 },
             ],
         );
 
+        // get all the accounts we will use for testing
         // @ts-ignore
         [liquidator, underwater, otherUnderwater, poor] = await ethers.getSigners();
 
@@ -71,9 +72,10 @@ describe("Test Liquidation Bot", () => {
         // deploy contracts
         const liquidatorFactory = await ethers.getContractFactory("Liquidator", liquidator);
         const testLiquidatorFactory = await ethers.getContractFactory("TestLiquidator", liquidator);
-        testLiquidator = await testLiquidatorFactory.deploy(JOE_ROUTER_ADDRESS, JOE_COMPTROLLER_ADDRESS)!;
-        Liquidator = await liquidatorFactory.deploy(JOE_ROUTER_ADDRESS, JOE_COMPTROLLER_ADDRESS);
+        testLiquidator = await testLiquidatorFactory.deploy(JOE_ROUTER_ADDRESS, JOE_COMPTROLLER_ADDRESS, JOE_FACTORY_ADDRESS)!;
+        Liquidator = await liquidatorFactory.deploy(JOE_ROUTER_ADDRESS, JOE_COMPTROLLER_ADDRESS, JOE_FACTORY_ADDRESS);
 
+        // get contracts that are already deployed
         WAVAX = await ethers.getContractAt("IERC20", WAVAX_ADDRESS);
         USDT = await ethers.getContractAt("IERC20", USDT_ADDRESS);
         USDC = await ethers.getContractAt("IERC20", USDC_ADDRESS);
@@ -96,6 +98,7 @@ describe("Test Liquidation Bot", () => {
 
         router = await ethers.getContractAt("IJoeRouter02", JOE_ROUTER_ADDRESS);
         comptroller = await ethers.getContractAt("Joetroller", JOE_COMPTROLLER_ADDRESS);
+        factory = await ethers.getContractAt("IJoeFactory", JOE_FACTORY_ADDRESS);
 
         priceOracle = await ethers.getContractAt("PriceOracle", ORACLE_ADDRESS);
 
@@ -103,6 +106,7 @@ describe("Test Liquidation Bot", () => {
     });
 
     describe.skip("Deploying", () => {
+        // simply check that the right owner is set
         it("Should set the right owner", async () => {
             expect(await Liquidator.owner()).to.equal(liquidator.address)
         });
@@ -120,13 +124,17 @@ describe("Test Liquidation Bot", () => {
 
         // AVAX -> USDT, USDT -> WETH, WETH -> AVAX, everything should work
         it.skip("Swapping with enough balance should work", async () => {
+            // give contract some avax
             let tx = await liquidator.sendTransaction({
                 to: testLiquidator.address,
                 value: ethers.utils.parseEther("1.0")
             });
             tx.wait();
+            // eth balance == amount of avax we just gave
             expect((await ethers.provider.getBalance(testLiquidator.address)).toString()).to.eq(ethers.utils.parseEther("1.0"));
 
+            // tests swap from native to token, swap token to token, and swap token to native, 
+            // we only need token to token though
             let output1 = await testLiquidator._swapFromNative(USDT_ADDRESS);
             await expect(output1.wait()).to.be.ok;
             expect(await USDT.balanceOf(testLiquidator.address)).gt('0');
@@ -172,264 +180,56 @@ describe("Test Liquidation Bot", () => {
         })
     });
 
-    describe.skip("Setting up underwater account and liquidating single position", async () => {
-
-        it('deposit and accrue interest; liquidate', async () => {
-            // need timestamp for timelimit input in swap function 
-            let timestamp = (
-                await ethers.provider.getBlock(
-                    await ethers.provider.getBlockNumber()
-                )
-            ).timestamp;
-
-            // swap for weth, will be depositing weth as collateral
-            await router.swapExactAVAXForTokens(
-                1,
-                [WAVAX_ADDRESS, WETH_ADDRESS],
-                underwater.address,
-                timestamp + 60,
-                { value: ethers.utils.parseEther("10.0") }
-            );
-
-            let WETH_balance = await WETH.balanceOf(underwater.address);
-
-            // balance of weth > 0, weth deposited in TJ = 0
-            expect(WETH_balance).gt('0');
-            expect(await jWETH.balanceOf(underwater.address)).eq('0');
-
-            // deposit all weth into TJ
-            await WETH.connect(underwater).approve(jWETH_ADDRESS, WETH_balance);
-            await jWETH.connect(underwater).mint(WETH_balance);
-
-            // balance of weth = 0, deposited weth > 0
-            expect(await WETH.balanceOf(underwater.address)).eq('0');
-            expect(await jWETH.balanceOf(underwater.address)).gt('0');
-
-            await comptroller.connect(underwater).enterMarkets([jWETH_ADDRESS]);
-
-            let before = await jWETH.callStatic.balanceOfUnderlying(underwater.address);
-
-            // accrues interest, weth has low interest, so we pass time
-            await ethers.provider.send("evm_increaseTime", [60]);
-            await jWETH.accrueInterest();
-
-            let now = await jWETH.callStatic.balanceOfUnderlying(underwater.address);
-
-            // interest accrual worked
-            expect(now).gt(before);
-            expect(now).gt(WETH_balance);
-            expect(await comptroller.checkMembership(underwater.address, jWETH_ADDRESS)).eq(true);
-
-            //// borrow max funds
-            // get max funds
-            let [err1, liquidity1, shortfall] = await comptroller.getAccountLiquidity(underwater.address);
-            // no shortfall yet, no error pls
-            expect(shortfall).eq('0');
-            expect(err1).eq('0');
-
-            // get price of borrow token.
-            let LINKprice = await priceOracle.getUnderlyingPrice(jLINK.address);
-
-            // calculate max borrow, need big ints else overflow
-            let max_borrow_amount = BigInt(liquidity1) * BigInt(10 ** 18) / BigInt(LINKprice);
-
-            // borrow max borrow amount
-            await jLINK.connect(underwater).borrow(max_borrow_amount);
-
-            // make sure some funds were borrowed
-            expect(await LINK.balanceOf(underwater.address)).gt('0');
-
-            // pass time
-            await ethers.provider.send("evm_increaseTime", [60 * 60 * 24 * 200]);
-
-            // update borrow balance ( apply interest )
-            // maybe can use accrueInterest instead?
-            // await jUSDT.borrowBalanceCurrent(underwater.address);
-            await jLINK.accrueInterest();
-
-            // "0" + is a test to see if a 0 in the front throws an error
-            // repay amount is wrong, does not account for decimals
-            let repayAmount = BigNumber.from(await jLINK.callStatic.borrowBalanceCurrent(underwater.address)).div(2);
-            console.log(repayAmount);
-
-            // no error pls; some shortfall tho
-            let [err2, liquidity2, someShortfall] = await comptroller.getAccountLiquidity(underwater.address);
-            expect(err2).eq('0');
-            expect(someShortfall).gt('0');
-
-            await Liquidator.connect(liquidator).liquidateLoan(underwater.address, repayAmount, jLINK_ADDRESS, LINK_ADDRESS, jWETH_ADDRESS, WETH_ADDRESS, jUSDC_ADDRESS, USDC_ADDRESS);
-
-            let profit = await USDC.balanceOf(liquidator.address);
-            expect(profit).gt('0');
-            console.log(`profit: ${(profit / 10 ** (await USDC.decimals())).toString()}`);
-
-        });
-    });
-
-    describe.skip("Optimal Liquidations", async () => {
-        it("case 1: single deposit is optimal", async () => {
-            // poor account, not enough value to liquidate
-            let timestamp = (
-                await ethers.provider.getBlock(
-                    await ethers.provider.getBlockNumber()
-                )
-            ).timestamp;
-            await router.swapExactAVAXForTokens(
-                1,
-                [WAVAX_ADDRESS, WETH_ADDRESS],
-                poor.address,
-                timestamp + 60,
-                { value: ethers.utils.parseEther("1.0") }
-            );
-            let poor_WETH_balance = await WETH.balanceOf(poor.address);
-            await WETH.connect(poor).approve(jWETH_ADDRESS, poor_WETH_balance);
-            await jWETH.connect(poor).mint(poor_WETH_balance);
-            await comptroller.connect(poor).enterMarkets([jWETH_ADDRESS]);
-
-            // 1 deosit, 1 borrow acct
-            await router.swapExactAVAXForTokens(
-                1,
-                [WAVAX_ADDRESS, WETH_ADDRESS],
-                underwater.address,
-                timestamp + 60,
-                { value: ethers.utils.parseEther("150.0") }
-            );
-            let underwater_WETH_balance = await WETH.balanceOf(underwater.address);
-            await WETH.connect(underwater).approve(jWETH_ADDRESS, underwater_WETH_balance);
-            await jWETH.connect(underwater).mint(underwater_WETH_balance);
-            await comptroller.connect(underwater).enterMarkets([jWETH_ADDRESS]);
-
-            await router.swapExactAVAXForTokens(
-                1,
-                [WAVAX_ADDRESS, WETH_ADDRESS],
-                otherUnderwater.address,
-                timestamp + 60,
-                { value: ethers.utils.parseEther("50.0") }
-            );
-            let other_WETH_balance = await WETH.balanceOf(otherUnderwater.address);
-            await router.swapExactAVAXForTokens(
-                1,
-                [WAVAX_ADDRESS, WBTC_ADDRESS],
-                otherUnderwater.address,
-                timestamp + 60,
-                { value: ethers.utils.parseEther("50.0") }
-            );
-            let other_WBTC_balance = await WBTC.balanceOf(otherUnderwater.address);
-            let other_WAVAX_balance = await ethers.utils.parseEther("50.0");
-            // deposit all into TJ
-            await WETH.connect(otherUnderwater).approve(jWETH_ADDRESS, other_WETH_balance);
-            await WBTC.connect(otherUnderwater).approve(jWBTC_ADDRESS, other_WBTC_balance);
-            await WAVAX.connect(otherUnderwater).approve(jWAVAX_ADDRESS, other_WAVAX_balance);
-            await jWETH.connect(otherUnderwater).mint(other_WETH_balance);
-            await jWBTC.connect(otherUnderwater).mint(other_WBTC_balance);
-            await jWAVAX.connect(otherUnderwater).mint(other_WAVAX_balance);
-
-            await comptroller.connect(otherUnderwater).enterMarkets([jWETH_ADDRESS, jWBTC_ADDRESS, jWAVAX_ADDRESS]);
-
-            //// borrow max funds
-            // get max funds
-            let [, liquidity1, ,] = await comptroller.getAccountLiquidity(underwater.address);
-            let [, liquidity2, ,] = await comptroller.getAccountLiquidity(otherUnderwater.address);
-            let [, liquidity3, ,] = await comptroller.getAccountLiquidity(poor.address);
-
-            // get price of borrow token.
-            let USDTprice = await priceOracle.getUnderlyingPrice(jUSDT.address);
-
-            // calculate max borrow, need big ints else overflow
-            let max_borrow_amount_underwater = BigInt(liquidity1) * BigInt(10 ** 18) / BigInt(USDTprice);
-            let max_borrow_amount_other = BigInt(liquidity2) * BigInt(10 ** 18) / BigInt(USDTprice);
-            let max_borrow_amount_poor = BigInt(liquidity3) * BigInt(10 ** 18) / BigInt(USDTprice);
-
-            // borrow max borrow amount
-            await jUSDT.connect(underwater).borrow(max_borrow_amount_underwater);
-            await jUSDT.connect(otherUnderwater).borrow(max_borrow_amount_other);
-            await jUSDT.connect(poor).borrow(max_borrow_amount_poor);
-
-            // pass time
-            await ethers.provider.send("evm_increaseTime", [60 * 60 * 24 * 100]);
-
-            // update borrow balance ( apply interest )
-            // maybe can use accrueInterest instead? yes.
-            await jUSDT.accrueInterest();
-
-            // some shortfall tho
-            let [, , someShortfall1] = await comptroller.getAccountLiquidity(underwater.address);
-            let [, , someShortfall2] = await comptroller.getAccountLiquidity(otherUnderwater.address);
-            let [, , someShortfall3] = await comptroller.getAccountLiquidity(poor.address);
-
-            // things worked
-            expect(someShortfall1).gt('0');
-            expect(someShortfall2).gt('0');
-            expect(someShortfall3).gt('0');
-
-            // determine which account to liquidate, and which position? max profit
-            // sort borrowed
-            // sort collateral
-            // 0.5*biggest borrow >= biggest collat?
-            // close biggest borrow, take biggest collat
-            // else: close biggest collat amount of biggest borrow, closing same amount of biggest collat
-            // profit = 2.5% of repay amount
-            // calculate profit for all positions, liquidation position with max profit might be kind of a tall order/time consuming
-
-            // did not test if liquidation is optimal here, findOptimalLiquidation takes graphql data as input and I have not set up a local node to query my set up underwater accounts
-            // TODO
-        })
-
-        it("case 2: multiple deposit is optimal", async () => {
-
-        });
-
-        it("case 3: no profitable liquidations", async () => {
-
-        });
-
-        it("case 4: randomized testing (pick random tokens to deposit and borrow, TODO", async () => {
-
-        });
-    });
-
-    describe("Liquidate real positions", () => {
-        it("0x343ba440db35997170cc6402692a0803c360c48c", async () => {
-            await network.provider.request({
-                method: "hardhat_impersonateAccount",
-                params: ["0x609c81644a2A85751F6F69C2f98F64f6D715b016"],
-            });
-            const signer = await ethers.getSigner("0x609c81644a2A85751F6F69C2f98F64f6D715b016");
+    describe.skip("Liquidate real positions", () => {
+        it("index.ts", async () => {
+            const signer = liquidator; // change name, unnecessary
             expect((await ethers.provider.getBalance(signer.address))).to.be.gt("0");
 
+            // get graphql client, then request underwater account data and market data
             const client = new GraphQLClient(TRADER_JOE_LENDING_SUBGRAPH_URL);
             let underwaterAccountsData = await client.request(UNDERWATER_ACCOUNTS_QUERY);
             let marketData = await client.request(MARKET_QUERY);
+            // all underwater account that match query
+            let underwaterAccounts = underwaterAccountsData["accounts"];
 
+            // if underwater accounts exist
             if (underwaterAccountsData["accounts"].length > 0) {
-                let [liquidationToken, seizeToken, flashToken, amountToFlashloan, liquidatee] = findOptimalLiquidation(underwaterAccountsData, marketData);
-                // token not used so far as seize or repay, prefer some tokens over others as theyre more liquid so take first in list also don't have to deal with issue of no direct paths with wavax, usdc, usdt
+                do {
+                    // get optimal liquidation
+                    var [liquidationToken, seizeToken, flashToken, amountToFlashloan, liquidatee, account] = findOptimalLiquidation(underwaterAccounts, marketData);
+
+                    // check whether account is actually underwater, some data on the subgraph is inaccurate
+                    if ((await comptroller.getAccountLiquidity(liquidatee))[2] == 0) {
+                        // if not actually underwater, remove from array and check again
+                        underwaterAccounts = underwaterAccounts.filter((x: any) => ![account].includes(x));
+                        continue;
+                    }
+                    // once found, move on
+                    break;
+                }
+                while (underwaterAccounts.length > 0); // go until no accounts left
 
                 let balanceBefore = await USDC.balanceOf(liquidator.address);
 
-                // get addresses using name
+                // get addresses using name in object, names come up as j"Token" and depending on the object will either give jToken address or just token address
                 let liquidationTokenAddress = JOE_TO_JERC20[liquidationToken];
                 let seizeTokenAddress = JOE_TO_JERC20[seizeToken];
                 let flashTokenAddress = JOE_TO_JERC20[flashToken];
                 let liquidationTokenUnderlyingAddress = JOE_TO_ERC20[liquidationToken];
                 let seizeTokenUnderlyingAddress = JOE_TO_ERC20[seizeToken];
                 let flashTokenUnderlyingAddress = JOE_TO_ERC20[flashToken];
-                console.log(liquidationToken, seizeToken, flashToken, amountToFlashloan, liquidatee);
-                await Liquidator.connect(signer).liquidateLoan(liquidatee, amountToFlashloan, liquidationTokenAddress, liquidationTokenUnderlyingAddress, seizeTokenAddress, seizeTokenUnderlyingAddress, flashTokenAddress, flashTokenUnderlyingAddress, { gasLimit: 1375015 })
 
+                console.log(liquidationToken, seizeToken, flashToken, amountToFlashloan, liquidatee);
+
+                // liquidate!
+                await Liquidator.connect(signer).liquidateLoan(liquidatee, amountToFlashloan, liquidationTokenAddress, liquidationTokenUnderlyingAddress, seizeTokenAddress, seizeTokenUnderlyingAddress, flashTokenAddress, flashTokenUnderlyingAddress, { gasLimit: 1375015 });
+
+                // $$$
                 let profit = (await USDC.balanceOf(liquidator.address)) - balanceBefore;
 
-
                 console.log(profit);
-
-
-
-
             }
         });
     });
-
-
-
 
 });

@@ -11,6 +11,7 @@ export const TRADER_JOE_EXCHANGE_SUBGRAPH_URL = "https://api.thegraph.com/subgra
 
 export const JOE_ROUTER_ADDRESS = "0x60aE616a2155Ee3d9A68541Ba4544862310933d4";
 export const JOE_COMPTROLLER_ADDRESS = "0xdc13687554205E5b89Ac783db14bb5bba4A1eDaC";
+export const JOE_FACTORY_ADDRESS = "0x9Ad6C38BE94206cA50bb0d90783181662f0Cfa10";
 
 export const WAVAX_ADDRESS = "0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7";
 export const WETH_ADDRESS = "0x49d5c2bdffac6ce2bfdb6640f4f80f226bc10bab";
@@ -70,9 +71,10 @@ export const DECIMALS_ERC20: any = {
     "jXJOE": 18,
 }
 
+// some error with the subgraph gives a bunch of accounts that borrow nothing with tons of collateral a health score very near 0, so to exclude those min health score of 0.1 is taken. This should not limit liquidations.
 export const UNDERWATER_ACCOUNTS_QUERY = gql`
 {
-    accounts(where: {health_gt: 0.1, health_lt: 1, totalCollateralValueInUSD_gt: 0}, orderBy: totalCollateralValueInUSD, orderDirection: desc, first: 6) {
+    accounts(where: {health_gt: 0.1, health_lt: 1, totalCollateralValueInUSD_gt: 0}, orderBy: totalCollateralValueInUSD, orderDirection: asc, first: 8) {
         id
         health
         totalBorrowValueInUSD

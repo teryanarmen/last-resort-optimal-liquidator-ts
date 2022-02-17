@@ -1,6 +1,3 @@
-import { task } from "hardhat/config";
-import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
-import { BigNumber } from "ethers";
 import "@nomiclabs/hardhat-ethers";
 import "@typechain/hardhat";
 import "@nomiclabs/hardhat-waffle";
@@ -29,6 +26,9 @@ const config: HardhatUserConfig = {
         version: "0.6.4"
       },
       {
+        version: "0.6.12"
+      },
+      {
         version: "0.7.0"
       },
       {
@@ -38,7 +38,7 @@ const config: HardhatUserConfig = {
   },
   networks: {
     hardhat: {
-      gasPrice: 23015607032,
+      gasPrice: "auto",
       chainId: 43114, //Only specify a chainId if we are not forking
       throwOnTransactionFailures: false,
       loggingEnabled: true,
@@ -67,7 +67,10 @@ const config: HardhatUserConfig = {
   typechain: {
     outDir: "typechain",
     target: "ethers-v5"
-  }
+  },
+  mocha: {
+    timeout: 100000
+  },
 }
 
 export default config;
