@@ -1,6 +1,6 @@
 import { gql } from 'graphql-request';
 
-export const LIQUIDATOR_ADDRESS = "0x0000000000000000000000000000000000000000"; // DEPLOY AND CHANGE ADDRESS
+export const LIQUIDATOR_ADDRESS = "0x7fcedaFb6325dB9A7Bc55D7D16220Ea1B7FD1e40"; // DEPLOY AND CHANGE ADDRESS
 export const TEST_LIQUIDATOR_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 export const AVALANCHE_MAINNET_URL = "https://api.avax.network/ext/bc/C/rpc";
@@ -74,7 +74,7 @@ export const DECIMALS_ERC20: any = {
 // some error with the subgraph gives a bunch of accounts that borrow nothing with tons of collateral a health score very near 0, so to exclude those min health score of 0.1 is taken. This should not limit liquidations.
 export const UNDERWATER_ACCOUNTS_QUERY = gql`
 {
-    accounts(where: {health_gt: 0.1, health_lt: 1, totalCollateralValueInUSD_gt: 0}, orderBy: totalCollateralValueInUSD, orderDirection: asc, first: 8) {
+    accounts(where: {health_gt: 0.1, health_lt: 1, totalCollateralValueInUSD_gt: 200}, orderBy: id, orderDirection: desc, first: 10) {
         id
         health
         totalBorrowValueInUSD

@@ -19,7 +19,7 @@ async function main() {
 
     let i = 0;
 
-    while (i < 1) { // CHANGE 1 TO DIFF NUMBER IF YOU WANT TO RUN CONTINUOUSLY
+    while (i >= 0) { // CHANGE 1 TO DIFF NUMBER IF YOU WANT TO RUN CONTINUOUSLY
         i++;
         // data for accounts and prices, accounts needed to make liquidation, prices needed to account for decimals
         let underwaterAccountsData = await client.request(UNDERWATER_ACCOUNTS_QUERY);
@@ -47,9 +47,4 @@ async function main() {
     }
 }
 
-main()
-    .then(() => process.exit(0))
-    .catch(error => {
-        console.error(error)
-        process.exit(1)
-    });
+main();
